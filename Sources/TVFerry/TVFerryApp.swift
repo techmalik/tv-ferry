@@ -16,6 +16,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             m.queue.add(urls: urls, to: m.settings.remoteFolder)
         }
     }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.offerAutoUpdates() }
+    }
+
+    /// Asked once, after the TV has been set up (so it doesn't pile onto the first-run setup sheet).
+    @MainActor private func offerAutoUpdates() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "askedAutoUpdates") else { Updates.checkIfDue(); return }
+        guard !AppModel.shared.settings.host.isEmpty else { return }
+        d.set(true, forKey: "askedAutoUpdates")
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Check for TV Ferry updates automatically?"
+        alert.informativeText = "Once a day TV Ferry would ask GitHub whether a newer version exists and tell you if there is one. Nothing about you or your Mac is sent. You can change this later from the TV Ferry menu."
+        alert.addButton(withTitle: "Check Automatically")
+        alert.addButton(withTitle: "Not Now")
+        UpdatePrefs.shared.autoCheck = alert.runModal() == .alertFirstButtonReturn
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -41,6 +60,26 @@ struct TVFerryApp: App {
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 760, height: 560)
+        .commands { AppCommands(updates: UpdatePrefs.shared) }
+    }
+}
+
+struct AppCommands: Commands {
+    @ObservedObject var updates: UpdatePrefs
+
+    var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About TV Ferry") { AboutWindowController.shared.show() }
+            Button("Check for Updates…") { Updates.check(userInitiated: true) }
+            Toggle("Check for Updates Automatically", isOn: $updates.autoCheck)
+        }
+        CommandGroup(replacing: .help) {
+            Button("Send Feedback…") { FeedbackWindowController.shared.show() }
+            Button("Report an Issue on GitHub") { NSWorkspace.shared.open(AppInfo.issues) }
+            Button("TV Ferry on GitHub") { NSWorkspace.shared.open(AppInfo.repo) }
+            Divider()
+            Button("Email \(AppInfo.author)") { NSWorkspace.shared.open(AppInfo.feedbackURL) }
+        }
     }
 }
 
@@ -48,7 +87,29 @@ struct TVFerryApp: App {
 enum Main {
     static func main() {
         let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--selftest") {
+        if let i = args.firstIndex(of: "--check-update") {
+            // Prints what the update checker sees on GitHub. Optional arg: pretend current version.
+            let current = args.count > i + 1 ? args[i + 1] : AppInfo.version
+            Task {
+                do {
+                    guard let r = try await Updates.fetchLatest() else { print("no release found"); exit(1) }
+                    print("latest=\(r.version) current=\(current) newer=\(Updates.isNewer(r.version, than: current)) download=\(r.download?.absoluteString ?? "-")")
+                    exit(0)
+                } catch { print("error:", error.localizedDescription); exit(1) }
+            }
+            dispatchMain()
+        } else if let i = args.firstIndex(of: "--feedback-test") {
+            // Posts a test message to the endpoint given (never the real inbox unless you pass it).
+            UserDefaults.standard.set(args[i + 1], forKey: "feedbackEndpointOverride")
+            Task {
+                do {
+                    try await FeedbackSender.send(kind: .bug, message: "test message", replyTo: "tester@example.com",
+                                                  includeSystemInfo: true, screenshot: Data([0xFF, 0xD8, 0xFF]))
+                    print("feedback sent OK to", AppInfo.feedbackEndpoint.absoluteString); exit(0)
+                } catch { print("feedback error:", error.localizedDescription); exit(1) }
+            }
+            dispatchMain()
+        } else if let i = args.firstIndex(of: "--selftest") {
             SelfTest.run(Array(args[(i + 1)...]))
         } else {
             TVFerryApp.main()

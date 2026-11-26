@@ -1,6 +1,6 @@
 # Contributing to TV Ferry
 
-Thanks for helping! Bug reports, fixes and ideas are all welcome.
+Thanks for helping! Bug reports, fixes and ideas are all welcome. You can also reach the author, Malik Kabir, at techmaleek@gmail.com.
 
 ## Getting set up
 - macOS 14 or later.
@@ -16,7 +16,12 @@ Thanks for helping! Bug reports, fixes and ideas are all welcome.
 | `NameSanitizer.swift` | Makes macOS file names safe for Android storage. |
 | `NetworkScanner.swift` | "Find TV": probes the local /24 subnet for an FTP greeting. |
 | `ContentView.swift`, `ConnectionSheet.swift`, `RemoteBrowser.swift` | SwiftUI interface. |
+| `Feedback.swift`, `AboutWindow.swift` | In-app feedback form (emails the author via formsubmit.co) and About window. |
+| `Updates.swift`, `AppInfo.swift` | GitHub release update check; app name, author, links. |
 | `LocalState.swift` | Stand-in for `@State`, so the app builds without full Xcode. |
+
+## Releasing
+Bump `CHANGELOG.md`, then push a tag (`git tag v0.2.0 && git push --tags`). The Build workflow tests, packages a universal `.dmg` and `.zip`, and publishes the GitHub release that the in-app update check reads.
 
 ## Guidelines
 - Keep it dependency-free (system frameworks + `/usr/bin/curl`).

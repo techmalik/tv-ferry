@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/techmalik/tv-ferry/actions/workflows/ci.yml"><img src="https://github.com/techmalik/tv-ferry/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/techmalik/tv-ferry/actions/workflows/build.yml"><img src="https://github.com/techmalik/tv-ferry/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-black.svg" alt="macOS 14+">
 </p>
@@ -46,9 +46,9 @@ TV Ferry fills that gap. Drop a movie on the window and it lands on the TV.
 
 ## Install
 
-1. Download `TV-Ferry-vX.Y.Z.zip` from [Releases](https://github.com/techmalik/tv-ferry/releases), unzip it, and move **TV Ferry.app** to Applications.
-2. The app isn't notarized by Apple yet, so the first time you open it, **right-click → Open → Open**.
-   If macOS still blocks it, run:
+1. Download **TV-Ferry-X.Y.Z.dmg** (or the `.zip`) from [Releases](https://github.com/techmalik/tv-ferry/releases), and drag **TV Ferry** into Applications.
+2. TV Ferry isn't notarized by Apple yet, so the first launch is blocked. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**.
+   Or run this once:
    ```bash
    xattr -dr com.apple.quarantine "/Applications/TV Ferry.app"
    ```
@@ -72,6 +72,12 @@ Or [build it yourself](#build-from-source) in under a minute.
 
 **Works with other FTP servers too.** File Manager+ is what TV Ferry was made for, but any FTP server (another Android app, a NAS, a Raspberry Pi) works the same way.
 
+## Updates and feedback
+
+- **Updates:** **TV Ferry → Check for Updates…** asks GitHub for the latest release. Turn on **Check for Updates Automatically** for a daily check. When there's a new version, TV Ferry offers to download it; quit TV Ferry and drag the new one into Applications. Your TV settings are kept.
+- **Send Feedback…** (Help menu, or the speech-bubble button in the window) opens a small form. Type your message, optionally take or attach a screenshot, and press **Send**: it goes straight to the author's inbox.
+- **Privacy:** no telemetry. TV Ferry only talks to your TV, plus two optional things: the feedback form, only when you press Send (sent over HTTPS via formsubmit.co), and the daily update check, if you turn it on (a plain request to GitHub's API, with nothing about you or your Mac).
+
 ## Troubleshooting
 
 | Message | Fix |
@@ -88,9 +94,12 @@ You need macOS 14 or later, and Xcode **or** just the Command Line Tools (`xcode
 ```bash
 git clone https://github.com/techmalik/tv-ferry.git
 cd tv-ferry
-./build.sh            # → dist/TV Ferry.app
-./scripts/e2e-test.sh # runs real transfers against a throwaway local FTP server
+./build.sh               # → dist/TV Ferry.app
+./scripts/e2e-test.sh    # runs real transfers against a throwaway local FTP server
+./scripts/package.sh     # → dist/TV-Ferry-<version>.zip / .dmg + SHA256SUMS.txt
 ```
+
+Pushing a tag like `v0.2.0` makes GitHub Actions test, build and publish a release, and the in-app update check picks it up.
 
 `UNIVERSAL=1 ./build.sh` builds for both Apple Silicon and Intel; this needs full Xcode.
 
@@ -105,10 +114,14 @@ FTP is unencrypted. Use TV Ferry only on a home network you trust, and stop the 
 - Recognise the TV automatically by name, once File Manager+ announces itself on the network
 - Notarized builds
 
+## Author
+
+Made by **Malik Kabir**. Questions, feedback or ideas: [techmaleek@gmail.com](mailto:techmaleek@gmail.com), or use **Send Feedback…** in the app.
+
 ## Contributing
 
 Pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE). TV Ferry is an independent project and isn't affiliated with File Manager+ or its developers.
+[MIT](LICENSE) © 2026 Malik Kabir. TV Ferry is an independent project and isn't affiliated with File Manager+ or its developers.

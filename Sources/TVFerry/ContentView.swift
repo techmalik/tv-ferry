@@ -74,6 +74,8 @@ struct ContentView: View {
                 Text(settings.remoteFolder).font(.system(.body, design: .monospaced)).lineLimit(1).truncationMode(.head)
             }
             Button("Change…") { showBrowser = true }.disabled(!settings.config.isComplete)
+            Button { FeedbackWindowController.shared.show() } label: { Image(systemName: "bubble.left.and.bubble.right") }
+                .buttonStyle(.borderless).help("Send feedback to \(AppInfo.author)")
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
