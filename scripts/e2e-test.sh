@@ -81,7 +81,8 @@ if command -v ffmpeg >/dev/null; then
   "$BIN" --check-video "Clip.mov" | grep -q "May not play" || fail "problem video not detected"
   out=$(run secret /Movies "Clip.mov" || true)
   grep -q "needsChoice" <<<"$out" || fail "did not ask before converting: $out"
-  TVFERRY_AUTOCONVERT=1 "$BIN" --selftest 127.0.0.1 28782 tv secret /Movies "Clip.mov" | grep -q "done | Clip.mov -> /Movies/Clip.mp4" || fail "auto-convert failed"
+  out=$(TVFERRY_AUTOCONVERT=1 "$BIN" --selftest 127.0.0.1 28782 tv secret /Movies "Clip.mov" 2>&1 || true)
+  grep -q "done | Clip.mov -> /Movies/Clip.mp4" <<<"$out" || fail "auto-convert failed: $out"
   "$BIN" --check-video "$WORK/tv/Movies/Clip.mp4" | grep -q ": OK" || fail "converted copy still flagged"
 else
   echo "(ffmpeg not installed: skipping conversion test)"
