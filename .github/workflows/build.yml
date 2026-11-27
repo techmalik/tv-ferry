@@ -17,6 +17,9 @@ jobs:
         with:
           fetch-depth: 0   # tags, so the build picks up the version
 
+      - name: Install ffmpeg (used only to make a test video)
+        run: brew install ffmpeg || echo "ffmpeg unavailable; conversion test will be skipped"
+
       - name: End-to-end transfer tests
         run: ./scripts/e2e-test.sh
 

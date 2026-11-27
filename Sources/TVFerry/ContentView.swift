@@ -156,6 +156,9 @@ struct ContentView: View {
                 Spacer()
                 if !queue.items.isEmpty {
                     Button("Add Files…") { showImporter = true }
+                    if queue.needsChoiceCount > 1 {
+                        Button("Convert All (\(queue.needsChoiceCount))") { queue.convertAll() }
+                    }
                     if queue.failedCount > 0 { Button("Retry Failed") { queue.retryFailed() } }
                     Button("Clear Finished") { queue.clearFinished() }
                         .disabled(!queue.items.contains { $0.state.isFinished })
@@ -189,6 +192,25 @@ struct TransferRow: View {
                     ProgressView(value: item.state == .checking ? nil : item.fraction)
                         .progressViewStyle(.linear)
                 }
+                if item.state == .converting {
+                    ProgressView(value: item.convertProgress).progressViewStyle(.linear).tint(.orange)
+                }
+                if item.state == .needsChoice, let issue = item.issue {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(issue.summary, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("The picture may freeze or go black while the sound keeps playing. Converting makes a TV-friendly copy (your original isn't changed).")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
+                            Button("Convert & Send") { queue.choose(item, convert: true) }
+                                .buttonStyle(.borderedProminent).controlSize(.small)
+                            Button("Send As Is") { queue.choose(item, convert: false) }
+                                .controlSize(.small)
+                        }
+                    }
+                }
                 HStack(spacing: 6) {
                     statusLabel
                     if item.wasRenamed {
@@ -211,14 +233,22 @@ struct TransferRow: View {
 
     @ViewBuilder private var statusLabel: some View {
         switch item.state {
-        case .queued: Text("Waiting").font(.caption).foregroundStyle(.secondary)
+        case .queued:
+            Text(item.convert ? "Waiting · will convert for the TV" : "Waiting").font(.caption).foregroundStyle(.secondary)
+        case .needsChoice:
+            Text("Your choice needed").font(.caption).foregroundStyle(.orange)
+        case .converting:
+            Text("Converting for the TV… \(Int(item.convertProgress * 100))%")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
         case .checking: Text("Checking the TV…").font(.caption).foregroundStyle(.secondary)
         case .uploading:
             Text("\(Int(item.fraction * 100))% · \(Fmt.bytes(item.bytesSent)) of \(Fmt.bytes(item.size))"
                  + (item.speed > 0 ? " · \(Fmt.bytes(Int64(item.speed)))/s · \(Fmt.eta(Double(item.size - item.bytesSent) / item.speed))" : "")
                  + (item.resumedFrom > 0 ? " · resumed" : ""))
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-        case .done: Label("Sent", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+        case .done:
+            Label(item.convert ? "Sent · converted for the TV" : "Sent", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.green)
         case .skipped(let why): Label(why, systemImage: "equal.circle").font(.caption).foregroundStyle(.secondary)
         case .cancelled: Label("Cancelled", systemImage: "xmark.circle").font(.caption).foregroundStyle(.secondary)
         case .failed(let why):
@@ -229,7 +259,7 @@ struct TransferRow: View {
 
     @ViewBuilder private var actions: some View {
         switch item.state {
-        case .queued, .checking, .uploading:
+        case .queued, .checking, .uploading, .converting, .needsChoice:
             Button { queue.cancel(item) } label: { Image(systemName: "xmark.circle.fill") }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Cancel")
         case .failed, .cancelled:

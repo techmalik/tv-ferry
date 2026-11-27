@@ -45,12 +45,20 @@ enum Prefs {
     private static let d = UserDefaults.standard
     static var autoCheckUpdates: Bool { get { d.bool(forKey: "autoCheckUpdates") } set { d.set(newValue, forKey: "autoCheckUpdates") } }
     static var lastUpdateCheck: Date? { get { d.object(forKey: "lastUpdateCheck") as? Date } set { d.set(newValue, forKey: "lastUpdateCheck") } }
+    /// Convert videos the TV may not play without asking. (TVFERRY_AUTOCONVERT=1 forces it, for tests.)
+    static var autoConvertVideos: Bool {
+        get { ProcessInfo.processInfo.environment["TVFERRY_AUTOCONVERT"] == "1" || d.bool(forKey: "autoConvertVideos") }
+        set { d.set(newValue, forKey: "autoConvertVideos") }
+    }
     static var skippedVersion: String? { get { d.string(forKey: "skippedVersion") } set { d.set(newValue, forKey: "skippedVersion") } }
 }
 
-/// Lets the menu's checkbox reflect and change the auto-update preference.
+/// Lets the menu's checkboxes reflect and change preferences.
 final class UpdatePrefs: ObservableObject {
     static let shared = UpdatePrefs()
+    @Published var autoConvert: Bool = Prefs.autoConvertVideos {
+        didSet { Prefs.autoConvertVideos = autoConvert }
+    }
     @Published var autoCheck: Bool = Prefs.autoCheckUpdates {
         didSet {
             Prefs.autoCheckUpdates = autoCheck

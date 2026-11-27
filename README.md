@@ -27,6 +27,7 @@ TV Ferry fills that gap. Drop a movie on the window and it lands on the TV.
 
 - **Drag and drop:** drop files or whole folders on the window or the Dock icon, or use *Open With → TV Ferry* in Finder.
 - **Resumes interrupted transfers:** if Wi-Fi drops halfway through a 4 GB movie, press Retry and it continues from where it stopped.
+- **Spots videos the TV can't play:** some videos play fine on a Mac, but on the TV the picture freezes or goes black while the sound carries on. TV Ferry flags these before sending and offers **Convert & Send**, which makes a TV-friendly copy with macOS's own encoder. Your original isn't touched, and nothing extra needs installing.
 - **Skips what's already there:** files already on the TV with the same size aren't sent again.
 - **Checks every upload:** after each file, the size on the TV is compared with the Mac's copy.
 - **Find TV:** scans your Wi-Fi for the TV, so you don't have to look up its IP address.
@@ -42,6 +43,7 @@ TV Ferry fills that gap. Drop a movie on the window and it lands on the TV.
 | Android's shared storage rejects `: * ? " < > \| \` (macOS allows most of them) | Replaces them with safe look-alikes, and flags renamed files in the list |
 | macOS litters folders with `.DS_Store`, `._*` resource forks, Spotlight folders | Never sends them |
 | Android names max out at 255 bytes | Shortens long names, keeping the extension |
+| Videos made from images or exported by some editors use full-range "JPEG" colour, very high H.264 levels, 10-bit/4:2:2 H.264, or ProRes; Macs play them, TV chips often don't | Flags them and offers to convert to standard H.264 (High profile, level 4.1 for HD, TV colour range, a keyframe every 2 s). Colours stay as they look on the Mac. Turn on **TV Ferry → Convert Videos the TV May Not Play Without Asking** to skip the question |
 | Files over 4 GB can't go onto a FAT32 USB drive plugged into the TV | Explains the failure, and suggests internal storage instead |
 
 ## Install
@@ -85,6 +87,7 @@ Or [build it yourself](#build-from-source) in under a minute.
 | *Can't reach the TV* | Make sure **Start service** is running on the TV, and that the Mac and TV are on the same Wi-Fi. |
 | *The TV refused the login* | Re-check the password. If the TV shows a username, enter it too; otherwise leave the username blank. |
 | *The TV refused the upload* | The TV may be out of space, or you're sending a file over 4 GB to a FAT32 USB drive. |
+| Picture freezes or goes black, sound keeps playing | The TV can't decode that video format. Send it again with **Convert & Send**. TV Ferry can check `.mp4`, `.m4v` and `.mov` files; for `.mkv` files, try VLC on the TV. |
 | Find TV finds nothing | The service must be running on the TV. Also check System Settings → Privacy & Security → Local Network → TV Ferry is on. |
 
 ## Build from source

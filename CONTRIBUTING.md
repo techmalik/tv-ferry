@@ -13,6 +13,7 @@ Thanks for helping! Bug reports, fixes and ideas are all welcome. You can also r
 |---|---|
 | `FTPClient.swift` | Talks FTP by driving the system `curl` (listing, size checks, uploads with progress). |
 | `TransferQueue.swift` | The upload queue: folder expansion, resume, skip-existing, verification. |
+| `VideoCheck.swift` | Detects videos TVs often can't decode, and re-encodes them (AVAssetReader/Writer) into TV-safe H.264. |
 | `NameSanitizer.swift` | Makes macOS file names safe for Android storage. |
 | `NetworkScanner.swift` | "Find TV": probes the local /24 subnet for an FTP greeting. |
 | `ContentView.swift`, `ConnectionSheet.swift`, `RemoteBrowser.swift` | SwiftUI interface. |

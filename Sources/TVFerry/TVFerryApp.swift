@@ -73,6 +73,9 @@ struct AppCommands: Commands {
             Button("Check for Updates…") { Updates.check(userInitiated: true) }
             Toggle("Check for Updates Automatically", isOn: $updates.autoCheck)
         }
+        CommandGroup(after: .appSettings) {
+            Toggle("Convert Videos the TV May Not Play Without Asking", isOn: $updates.autoConvert)
+        }
         CommandGroup(replacing: .help) {
             Button("Send Feedback…") { FeedbackWindowController.shared.show() }
             Button("Report an Issue on GitHub") { NSWorkspace.shared.open(AppInfo.issues) }
@@ -87,7 +90,26 @@ struct AppCommands: Commands {
 enum Main {
     static func main() {
         let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--check-update") {
+        if let i = args.firstIndex(of: "--check-video") {
+            // Prints whether each file may not play on a TV.
+            Task {
+                for path in args[(i + 1)...] {
+                    let issue = await VideoCheck.inspect(URL(fileURLWithPath: path))
+                    print("\((path as NSString).lastPathComponent): \(issue?.summary ?? "OK")")
+                }
+                exit(0)
+            }
+            dispatchMain()
+        } else if let i = args.firstIndex(of: "--convert-video"), args.count > i + 2 {
+            Task {
+                do {
+                    try await VideoCheck.Conversion().run(input: URL(fileURLWithPath: args[i + 1]),
+                                                          output: URL(fileURLWithPath: args[i + 2])) { _ in }
+                    print("converted"); exit(0)
+                } catch { print("convert error:", error.localizedDescription); exit(1) }
+            }
+            dispatchMain()
+        } else if let i = args.firstIndex(of: "--check-update") {
             // Prints what the update checker sees on GitHub. Optional arg: pretend current version.
             let current = args.count > i + 1 ? args[i + 1] : AppInfo.version
             Task {

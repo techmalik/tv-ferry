@@ -5,6 +5,9 @@ import SwiftUI
 final class TransferItem: ObservableObject, Identifiable {
     enum State: Equatable {
         case queued, checking, uploading, done, skipped(String), failed(String), cancelled
+        /// Video may not play on the TV; waiting for "Convert & Send" or "Send As Is".
+        case needsChoice
+        case converting
         var isFinished: Bool {
             switch self { case .done, .skipped, .failed, .cancelled: return true; default: return false }
         }
@@ -12,25 +15,34 @@ final class TransferItem: ObservableObject, Identifiable {
 
     let id = UUID()
     let localURL: URL
-    let remotePath: String
-    let size: Int64
+    var remotePath: String
+    /// Bytes to send: the original's size, or the converted copy's once it exists.
+    var size: Int64
     let originalName: String
-    let remoteName: String
+    var remoteName: String { (remotePath as NSString).lastPathComponent }
 
     @Published var state: State = .queued
     @Published var bytesSent: Int64 = 0
     @Published var speed: Double = 0      // bytes / second
     @Published var resumedFrom: Int64 = 0
 
+    // Video compatibility
+    @Published var issue: VideoIssue?
+    @Published var convert = false
+    @Published var convertProgress: Double = 0
+    var convertedURL: URL?
+    var checkTask: Task<Void, Never>?
+    /// What actually gets uploaded.
+    var sourceURL: URL { convertedURL ?? localURL }
+
     var fraction: Double { size > 0 ? Double(bytesSent) / Double(size) : (state == .done ? 1 : 0) }
-    var wasRenamed: Bool { originalName != remoteName }
+    var wasRenamed: Bool { originalName != remoteName && !convert }
 
     init(localURL: URL, remotePath: String, size: Int64) {
         self.localURL = localURL
         self.remotePath = remotePath
         self.size = size
         self.originalName = localURL.lastPathComponent
-        self.remoteName = (remotePath as NSString).lastPathComponent
     }
 }
 
@@ -42,11 +54,18 @@ final class TransferQueue: ObservableObject {
     @Published var lastNotice: String?
 
     private var current: CurlRun?
+    private var currentConversion: VideoCheck.Conversion?
     private var currentItem: TransferItem?
     private var sleepActivity: NSObjectProtocol?
     let settings: ConnectionSettings
 
-    init(settings: ConnectionSettings) { self.settings = settings }
+    init(settings: ConnectionSettings) {
+        self.settings = settings
+        // Converted copies left over from a previous run are no longer needed.
+        if let old = try? FileManager.default.contentsOfDirectory(at: VideoCheck.workFolder, includingPropertiesForKeys: nil) {
+            old.forEach { try? FileManager.default.removeItem(at: $0) }
+        }
+    }
 
     // MARK: Adding
 
@@ -91,6 +110,48 @@ final class TransferQueue: ObservableObject {
         // Don't queue the same destination twice while it's still pending.
         if items.contains(where: { $0.remotePath == item.remotePath && !$0.state.isFinished }) { return }
         items.append(item)
+        if VideoCheck.isCheckable(item.localURL) {
+            item.checkTask = Task { [weak self] in await self?.checkVideo(item) }
+        }
+    }
+
+    // MARK: Video compatibility
+
+    private func checkVideo(_ item: TransferItem) async {
+        guard let issue = await VideoCheck.inspect(item.localURL) else { return }
+        item.issue = issue
+        if Prefs.autoConvertVideos {
+            setConvert(item)
+        } else if item.state == .queued {
+            item.state = .needsChoice
+        }
+    }
+
+    private func setConvert(_ item: TransferItem) {
+        item.convert = true
+        let ext = (item.remotePath as NSString).pathExtension.lowercased()
+        if ext != "mp4" && ext != "m4v" {
+            item.remotePath = (item.remotePath as NSString).deletingPathExtension + ".mp4"
+        }
+    }
+
+    /// The user's answer for a video that may not play on the TV.
+    func choose(_ item: TransferItem, convert: Bool) {
+        if convert { setConvert(item) }
+        item.state = .queued
+        startIfNeeded()
+    }
+
+    func convertAll() {
+        for i in items where i.state == .needsChoice { setConvert(i); i.state = .queued }
+        startIfNeeded()
+    }
+
+    var needsChoiceCount: Int { items.filter { $0.state == .needsChoice }.count }
+
+    private func discardConverted(_ item: TransferItem) {
+        if let u = item.convertedURL { try? FileManager.default.removeItem(at: u) }
+        item.convertedURL = nil
     }
 
     // MARK: Control
@@ -108,6 +169,7 @@ final class TransferQueue: ObservableObject {
         paused = true
         if let item = currentItem { item.state = .queued }
         current?.cancel()
+        currentConversion?.cancel()
     }
 
     func resume() {
@@ -116,7 +178,7 @@ final class TransferQueue: ObservableObject {
     }
 
     func cancel(_ item: TransferItem) {
-        if item === currentItem { current?.cancel() }
+        if item === currentItem { current?.cancel(); currentConversion?.cancel() }
         item.state = .cancelled
     }
 
@@ -131,7 +193,10 @@ final class TransferQueue: ObservableObject {
         startIfNeeded()
     }
 
-    func clearFinished() { items.removeAll { $0.state.isFinished } }
+    func clearFinished() {
+        for i in items where i.state.isFinished { discardConverted(i) }
+        items.removeAll { $0.state.isFinished }
+    }
 
     // MARK: Totals
 
@@ -155,12 +220,42 @@ final class TransferQueue: ObservableObject {
     private func upload(_ item: TransferItem) async {
         let config = settings.config
         currentItem = item
+
+        // Wait for the video check, which may decide the user should choose first.
+        if let t = item.checkTask { await t.value; item.checkTask = nil }
+        guard item.state == .queued else { return }
+
         item.state = .checking
         item.speed = 0
 
         guard FileManager.default.isReadableFile(atPath: item.localURL.path) else {
             item.state = .failed("The file on this Mac can't be read (moved or deleted?).")
             return
+        }
+
+        if item.convert, item.convertedURL.map({ !FileManager.default.fileExists(atPath: $0.path) }) ?? true {
+            item.state = .converting
+            item.convertProgress = 0
+            let out = VideoCheck.workFolder.appendingPathComponent(UUID().uuidString + ".mp4")
+            let conversion = VideoCheck.Conversion()
+            currentConversion = conversion
+            do {
+                try await conversion.run(input: item.localURL, output: out) { [weak item] p in item?.convertProgress = p }
+                currentConversion = nil
+                item.convertedURL = out
+                let size = ((try? FileManager.default.attributesOfItem(atPath: out.path))?[.size] as? NSNumber)?.int64Value ?? 0
+                item.size = size
+                item.bytesSent = 0
+            } catch {
+                currentConversion = nil
+                if error is CancellationError {
+                    if item.state != .cancelled { item.state = paused ? .queued : .cancelled }
+                } else {
+                    item.state = .failed("Couldn't convert the video: \(error.localizedDescription)")
+                }
+                return
+            }
+            item.state = .checking
         }
 
         let remoteSize = await FTPClient.size(item.remotePath, config: config)
@@ -174,8 +269,10 @@ final class TransferQueue: ObservableObject {
                     item.state = .skipped("Already on TV")
                     return
                 }
-            } else if rs > 0 && rs < item.size {
-                resumeFrom = rs   // a previous transfer was interrupted: carry on from there
+            } else if rs > 0 && rs < item.size && !item.convert {
+                // A previous transfer was interrupted: carry on from there. (Never for converted
+                // copies: a re-encode isn't byte-identical, so they're always sent from the start.)
+                resumeFrom = rs
             }
         }
 
@@ -186,7 +283,7 @@ final class TransferQueue: ObservableObject {
         var lastTick = Date()
         var lastBytes = resumeFrom
         let total = item.size
-        let run = FTPClient.makeUpload(local: item.localURL, remotePath: item.remotePath,
+        let run = FTPClient.makeUpload(local: item.sourceURL, remotePath: item.remotePath,
                                        resumeFrom: resumeFrom, config: config) { [weak item] frac in
             Task { @MainActor in
                 // curl reports a share of the WHOLE file (even when resuming) and emits a
@@ -224,5 +321,6 @@ final class TransferQueue: ObservableObject {
         item.bytesSent = item.size
         item.speed = 0
         item.state = .done
+        discardConverted(item)
     }
 }

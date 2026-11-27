@@ -54,4 +54,17 @@ echo "== wrong password"
 out=$(run wrong /Movies "Movie (2024).mkv" || true)
 grep -q "refused the login" <<<"$out" || fail "bad login message: $out"
 
+echo "== video the TV may not play (full-range colour, level 5.0) is converted"
+if command -v ffmpeg >/dev/null; then
+  ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1280x720:rate=30:duration=3 -f lavfi -i sine=duration=3 \
+    -pix_fmt yuvj420p -c:v libx264 -level:v 5.0 -c:a aac -shortest "Clip.mov"
+  "$BIN" --check-video "Clip.mov" | grep -q "May not play" || fail "problem video not detected"
+  out=$(run secret /Movies "Clip.mov" || true)
+  grep -q "needsChoice" <<<"$out" || fail "did not ask before converting: $out"
+  TVFERRY_AUTOCONVERT=1 "$BIN" --selftest 127.0.0.1 28782 tv secret /Movies "Clip.mov" | grep -q "done | Clip.mov -> /Movies/Clip.mp4" || fail "auto-convert failed"
+  "$BIN" --check-video "$WORK/tv/Movies/Clip.mp4" | grep -q ": OK" || fail "converted copy still flagged"
+else
+  echo "(ffmpeg not installed: skipping conversion test)"
+fi
+
 echo "All end-to-end checks passed."
