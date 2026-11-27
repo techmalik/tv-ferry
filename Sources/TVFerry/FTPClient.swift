@@ -47,21 +47,38 @@ struct CurlResult {
     var ok: Bool { status == 0 && !cancelled }
 }
 
-/// One run of /usr/bin/curl. Keeps a handle on the process so a transfer can be cancelled.
-final class CurlRun {
+/// Something sending a file that can be stopped part-way (curl for FTP, adb for network debugging).
+protocol TransferRun: AnyObject {
+    func run() async -> CurlResult
+    func cancel()
+}
+
+typealias CurlRun = ProcessRun
+
+extension ProcessRun {
+    /// One run of /usr/bin/curl. Credentials go in on stdin as a curl config.
+    convenience init(arguments: [String], config: FTPConfig) {
+        self.init(executable: URL(fileURLWithPath: "/usr/bin/curl"),
+                  arguments: ["-K", "-", "--connect-timeout", "8"] + arguments,
+                  stdin: Data(config.curlConfigText.utf8))
+    }
+}
+
+/// One run of a command-line tool. Keeps a handle on the process so it can be cancelled.
+final class ProcessRun: TransferRun {
     private let process = Process()
     private let lock = NSLock()
     private var out = Data()
     private var err = Data()
     private var wasCancelled = false
-    private let configText: String
-    /// Called (on a background queue) with each chunk curl writes to stderr — used for the progress bar.
+    private let stdinData: Data
+    /// Called (on a background queue) with each chunk the tool writes to stderr — used for the progress bar.
     var onStderr: ((String) -> Void)?
 
-    init(arguments: [String], config: FTPConfig) {
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = ["-K", "-", "--connect-timeout", "8"] + arguments
-        configText = config.curlConfigText
+    init(executable: URL, arguments: [String], stdin: Data = Data()) {
+        process.executableURL = executable
+        process.arguments = arguments
+        stdinData = stdin
     }
 
     func run() async -> CurlResult {
@@ -106,7 +123,7 @@ final class CurlRun {
                 cont.resume(returning: CurlResult(status: -1, stdout: Data(), stderr: error.localizedDescription, cancelled: false))
                 return
             }
-            inPipe.fileHandleForWriting.write(Data(configText.utf8))
+            if !stdinData.isEmpty { inPipe.fileHandleForWriting.write(stdinData) }
             try? inPipe.fileHandleForWriting.close()
         }
     }
@@ -203,7 +220,7 @@ enum FTPClient {
 
     /// Size of a remote file, or nil if it doesn't exist.
     static func size(_ path: String, config: FTPConfig) async -> Int64? {
-        let run = CurlRun(arguments: ["-sS", "-I", config.url(path)], config: config)
+        let run = CurlRun(arguments: ["-sS", "-Q", "*OPTS UTF8 ON", "-I", config.url(path)], config: config)
         let r = await run.run()
         guard r.ok else { return nil }
         let text = String(decoding: r.stdout, as: UTF8.self)
@@ -231,9 +248,12 @@ enum FTPClient {
 
     /// Starts an upload. Progress (0...1 of the bytes this run sends) is reported via `progress`.
     static func makeUpload(local: URL, remotePath: String, resumeFrom: Int64, config: FTPConfig,
-                           progress: @escaping (Double) -> Void) -> CurlRun {
+                           progress: @escaping (Double) -> Void) -> ProcessRun {
         var args = ["-#", "-S", "--ftp-create-dirs", "-Q", "*OPTS UTF8 ON", "-T", local.path]
         if resumeFrom > 0 { args += ["-C", String(resumeFrom)] }
+        // Test hook (end-to-end tests slow uploads down so they can interrupt one part-way).
+        let env = ProcessInfo.processInfo.environment
+        if env["TVFERRY_DEBUG"] == "1", let rate = env["TVFERRY_LIMIT_RATE"], !rate.isEmpty { args += ["--limit-rate", rate] }
         args.append(config.url(remotePath))
         let run = CurlRun(arguments: args, config: config)
         // curl's progress bar writes "\r####   42.7%" repeatedly.

@@ -26,14 +26,26 @@ TV Ferry fills that gap. Drop a movie on the window and it lands on the TV.
 ## Features
 
 - **Drag and drop:** drop files or whole folders on the window or the Dock icon, or use *Open With → TV Ferry* in Finder.
-- **Resumes interrupted transfers:** if Wi-Fi drops halfway through a 4 GB movie, press Retry and it continues from where it stopped.
+- **Resumes interrupted transfers:** if Wi-Fi drops halfway through a 4 GB movie, press Retry and it continues from where it stopped. It only resumes files it started sending itself, so a different file that happens to share the name is never appended to.
 - **Spots videos the TV can't play:** some videos play fine on a Mac, but on the TV the picture freezes or goes black while the sound carries on. TV Ferry flags these before sending and offers **Convert & Send**, which makes a TV-friendly copy with macOS's own encoder. Your original isn't touched, and nothing extra needs installing.
 - **Skips what's already there:** files already on the TV with the same size aren't sent again.
-- **Checks every upload:** after each file, the size on the TV is compared with the Mac's copy.
+- **Checks every upload:** after each file, the size on the TV is compared with the Mac's copy. If the TV won't say, the file is marked as not checked rather than passed.
 - **Find TV:** scans your Wi-Fi for the TV, so you don't have to look up its IP address.
 - **Browse the TV:** pick the destination folder, or create a new one, without leaving the Mac.
 - **Keeps the Mac awake** while a transfer is running, and shows live speed and time left.
+- **Menu bar panel:** drop files and watch transfers from the menu bar (can be turned off).
+- **Light, Dark or Match System** appearance, in **TV Ferry → Settings…** (⌘,).
 - **No dependencies:** pure SwiftUI plus the system `curl`. The password is kept in the macOS Keychain.
+
+### Two ways to connect
+
+| | File Manager+ (FTP) | Network debugging (ADB) |
+|---|---|---|
+| On the TV each time | Open File Manager+ and press **Start service** | Nothing: works whenever the TV is on |
+| One-time setup | Untick **Random password** | Turn on Developer options and **Network debugging**, then allow this Mac when the TV asks |
+| Needs on the Mac | Nothing | Google's `adb` tool (TV Ferry offers to download it, or uses one from Homebrew / Android Studio) |
+| Resume after a drop | Yes | No, the file is sent again |
+| Security | Unencrypted FTP, password-protected | Anyone you allow can fully control the TV; use on your home Wi-Fi only |
 
 ### Mac ↔ Android file-system differences, handled
 
@@ -113,7 +125,7 @@ FTP is unencrypted. Use TV Ferry only on a home network you trust, and stop the 
 ## Roadmap ideas
 
 - Remember several TVs
-- Menu-bar mode, plus a "Send to TV Ferry" Finder action
+- A "Send to TV Ferry" Finder action
 - Recognise the TV automatically by name, once File Manager+ announces itself on the network
 - Notarized builds
 

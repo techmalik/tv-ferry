@@ -6,6 +6,7 @@ final class AppModel {
     static let shared = AppModel()
     let settings = ConnectionSettings()
     lazy var queue = TransferQueue(settings: settings)
+    lazy var monitor = ConnectionMonitor(settings: settings)
 }
 
 /// Lets you drop files onto the Dock icon, or use "Open With → TV Ferry" in Finder.
@@ -17,6 +18,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { UpdatePrefs.shared.appearance.apply() }
+        // Test hook: TVFERRY_DEBUG=1 TVFERRY_ENQUEUE="<path>\n<path>" queues files at launch (used for screenshots).
+        let env = ProcessInfo.processInfo.environment
+        if env["TVFERRY_DEBUG"] == "1", let list = env["TVFERRY_ENQUEUE"], !list.isEmpty {
+            let urls = list.split(separator: "\n").map { URL(fileURLWithPath: String($0)) }
+            MainActor.assumeIsolated { AppModel.shared.queue.add(urls: urls, to: AppModel.shared.settings.remoteFolder) }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.offerAutoUpdates() }
     }
 
@@ -35,7 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdatePrefs.shared.autoCheck = alert.runModal() == .alertFirstButtonReturn
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// With the menu bar panel on, TV Ferry keeps running (and sending) after its window closes.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !UpdatePrefs.shared.showInMenuBar }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let q = MainActor.assumeIsolated { AppModel.shared.queue }
@@ -52,15 +61,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct TVFerryApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @ObservedObject private var prefs = UpdatePrefs.shared
 
     var body: some Scene {
+        let m = AppModel.shared
         Window("TV Ferry", id: "main") {
-            ContentView(settings: AppModel.shared.settings, queue: AppModel.shared.queue)
-                .frame(minWidth: 620, minHeight: 460)
+            ContentView(settings: m.settings, queue: m.queue, monitor: m.monitor)
+                .frame(minWidth: 780, minHeight: 480)
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 760, height: 560)
-        .commands { AppCommands(updates: UpdatePrefs.shared) }
+        .defaultSize(width: 900, height: 580)
+        .commands { AppCommands(updates: prefs) }
+
+        // SwiftUI writes this binding back while it draws; ignoring writes that change nothing avoids a redraw loop.
+        MenuBarExtra(isInserted: Binding(get: { prefs.showInMenuBar },
+                                         set: { if $0 != prefs.showInMenuBar { prefs.showInMenuBar = $0 } })) {
+            MenuBarPanel(settings: m.settings, queue: m.queue, monitor: m.monitor)
+        } label: {
+            MenuBarIcon(queue: m.queue)
+        }
+        .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView(prefs: prefs, settings: m.settings)
+        }
     }
 }
 
@@ -74,6 +98,10 @@ struct AppCommands: Commands {
             Toggle("Check for Updates Automatically", isOn: $updates.autoCheck)
         }
         CommandGroup(after: .appSettings) {
+            Picker("Appearance", selection: $updates.appearance) {
+                ForEach(AppearanceMode.allCases) { Text($0.label).tag($0) }
+            }
+            Toggle("Show in Menu Bar", isOn: $updates.showInMenuBar)
             Toggle("Convert Videos the TV May Not Play Without Asking", isOn: $updates.autoConvert)
         }
         CommandGroup(replacing: .help) {
@@ -131,6 +159,8 @@ enum Main {
                 } catch { print("feedback error:", error.localizedDescription); exit(1) }
             }
             dispatchMain()
+        } else if let i = args.firstIndex(of: "--selftest-adb") {
+            SelfTest.runADB(Array(args[(i + 1)...]))
         } else if let i = args.firstIndex(of: "--selftest") {
             SelfTest.run(Array(args[(i + 1)...]))
         } else {
@@ -150,8 +180,31 @@ enum SelfTest {
         Task { @MainActor in
             if let err = await FTPClient.test(config: cfg) { print("CONNECT FAIL:", err); exit(1) }
             print("connected; root:", (try? await FTPClient.list("/", config: cfg).map(\.name)) ?? [])
-            let q = TransferQueue(settings: ConnectionSettings(ephemeral: cfg, folder: a[4]))
-            q.add(urls: a[5...].map { URL(fileURLWithPath: $0) }, to: a[4])
+            await drive(TransferQueue(settings: ConnectionSettings(ephemeral: cfg, folder: a[4])),
+                        urls: a[5...].map { URL(fileURLWithPath: $0) }, folder: a[4])
+        }
+        dispatchMain()
+    }
+
+    /// `TVFerry --selftest-adb <host> <port> <remoteDir> <file-or-folder>...` — the same over network debugging.
+    static func runADB(_ a: [String]) {
+        guard a.count >= 4, let port = Int(a[1]) else {
+            print("usage: --selftest-adb host port remoteDir paths..."); exit(2)
+        }
+        let cfg = FTPConfig(host: a[0], port: port, user: "", password: "")
+        let remote = Remote(kind: .adb, ftp: cfg, adbPort: port)
+        Task { @MainActor in
+            if let err = await RemoteFS.test(remote) { print("CONNECT FAIL:", err); exit(1) }
+            print("connected; root:", (try? await RemoteFS.list("/", on: remote).map(\.name)) ?? [])
+            await drive(TransferQueue(settings: ConnectionSettings(ephemeral: cfg, folder: a[2], kind: .adb)),
+                        urls: a[3...].map { URL(fileURLWithPath: $0) }, folder: a[2])
+        }
+        dispatchMain()
+    }
+
+    @MainActor private static func drive(_ q: TransferQueue, urls: [URL], folder: String) async {
+        do {  // keeps the body's indentation
+            q.add(urls: urls, to: folder)
             if let n = q.lastNotice { print("notice:", n) }
             var lastPrint = Date.distantPast
             while q.isRunning {
@@ -163,11 +216,10 @@ enum SelfTest {
             }
             var bad = 0
             for i in q.items {
-                print("\(i.state) | \(i.originalName) -> \(i.remotePath) | \(i.bytesSent)/\(i.size) resumedFrom=\(i.resumedFrom)")
+                print("\(i.state) | \(i.originalName) -> \(i.remotePath) | \(i.bytesSent)/\(i.size) resumedFrom=\(i.resumedFrom) verified=\(i.verified)")
                 if case .failed = i.state { bad += 1 }
             }
             exit(bad == 0 ? 0 : 1)
         }
-        dispatchMain()
     }
 }

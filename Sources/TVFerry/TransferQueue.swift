@@ -25,6 +25,8 @@ final class TransferItem: ObservableObject, Identifiable {
     @Published var bytesSent: Int64 = 0
     @Published var speed: Double = 0      // bytes / second
     @Published var resumedFrom: Int64 = 0
+    /// After a send: whether the TV confirmed it holds exactly as many bytes as the Mac.
+    @Published var verified = false
 
     // Video compatibility
     @Published var issue: VideoIssue?
@@ -53,7 +55,7 @@ final class TransferQueue: ObservableObject {
     @Published var paused = false
     @Published var lastNotice: String?
 
-    private var current: CurlRun?
+    private var current: TransferRun?
     private var currentConversion: VideoCheck.Conversion?
     private var currentItem: TransferItem?
     private var sleepActivity: NSObjectProtocol?
@@ -158,7 +160,7 @@ final class TransferQueue: ObservableObject {
 
     func startIfNeeded() {
         guard !isRunning, !paused else { return }
-        guard settings.config.isComplete else { lastNotice = "Set the TV's address first."; return }
+        guard settings.remote.isComplete else { lastNotice = "Set the TV's address first."; return }
         isRunning = true
         sleepActivity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated],
                                                               reason: "Sending files to TV")
@@ -218,7 +220,7 @@ final class TransferQueue: ObservableObject {
     }
 
     private func upload(_ item: TransferItem) async {
-        let config = settings.config
+        let config = settings.remote
         currentItem = item
 
         // Wait for the video check, which may decide the user should choose first.
@@ -258,33 +260,39 @@ final class TransferQueue: ObservableObject {
             item.state = .checking
         }
 
-        let remoteSize = await FTPClient.size(item.remotePath, config: config)
+        let remoteSize = await RemoteFS.size(item.remotePath, on: config)
         if item.state == .cancelled || paused { if paused { item.state = .queued }; return }
 
         var resumeFrom: Int64 = 0
         if let rs = remoteSize {
             if rs == item.size {
                 if settings.skipExisting {
+                    PartialUploads.finish(config, remotePath: item.remotePath)
                     item.bytesSent = item.size
                     item.state = .skipped("Already on TV")
                     return
                 }
-            } else if rs > 0 && rs < item.size && !item.convert {
-                // A previous transfer was interrupted: carry on from there. (Never for converted
-                // copies: a re-encode isn't byte-identical, so they're always sent from the start.)
+            } else if rs > 0 && rs < item.size, RemoteFS.supportsResume(config),
+                      PartialUploads.canResume(config, remotePath: item.remotePath, local: item.sourceURL, size: item.size) {
+                // TV Ferry was interrupted sending this same, unchanged file: carry on from there.
+                // Any other smaller file with this name (an older copy, a different movie) is
+                // replaced from the start instead. A converted copy resumes only while the exact
+                // copy it started from still exists; a fresh re-encode isn't byte-identical.
                 resumeFrom = rs
             }
         }
 
+        PartialUploads.begin(config, remotePath: item.remotePath, local: item.sourceURL, size: item.size)
         item.resumedFrom = resumeFrom
+        item.verified = false
         item.bytesSent = resumeFrom
         item.state = .uploading
 
         var lastTick = Date()
         var lastBytes = resumeFrom
         let total = item.size
-        let run = FTPClient.makeUpload(local: item.sourceURL, remotePath: item.remotePath,
-                                       resumeFrom: resumeFrom, config: config) { [weak item] frac in
+        let run = RemoteFS.makeUpload(local: item.sourceURL, remotePath: item.remotePath,
+                                      resumeFrom: resumeFrom, size: total, on: config) { [weak item] frac in
             Task { @MainActor in
                 // curl reports a share of the WHOLE file (even when resuming) and emits a
                 // stray "100%" on its first tick, so ignore 100% until the transfer actually ends.
@@ -310,14 +318,18 @@ final class TransferQueue: ObservableObject {
             return
         }
         guard result.ok else {
-            item.state = .failed(FTPClient.friendlyMessage(code: result.status, raw: result.stderr, fileSize: item.size))
+            item.state = .failed(RemoteFS.friendlyMessage(result, on: config, fileSize: item.size))
             return
         }
         // Verify: the TV should now hold exactly as many bytes as the Mac.
-        if let rs = await FTPClient.size(item.remotePath, config: config), rs != item.size {
+        // If the TV won't report the size, say so rather than claiming the file was checked.
+        let remoteAfter = await RemoteFS.size(item.remotePath, on: config)
+        if let rs = remoteAfter, rs != item.size {
             item.state = .failed("Size mismatch after upload (TV has \(rs) of \(item.size) bytes). Press Retry to resume.")
             return
         }
+        item.verified = remoteAfter != nil
+        PartialUploads.finish(config, remotePath: item.remotePath)
         item.bytesSent = item.size
         item.speed = 0
         item.state = .done

@@ -4,7 +4,7 @@ import Foundation
 enum AppInfo {
     static let name = "TV Ferry"
     static let tagline = "Drag movies from your Mac onto your Android TV."
-    static let summary = "TV Ferry sends files and folders from your Mac to File Manager+ on your Android TV over your Wi-Fi. It fixes file names Android can't take, skips macOS clutter, and picks up interrupted transfers where they stopped."
+    static let summary = "TV Ferry sends files and folders from your Mac to your Android TV over your Wi-Fi, through File Manager+ or Android's network debugging. It fixes file names Android can't take, skips macOS clutter, and picks up interrupted transfers where they stopped."
     static let author = "Malik Kabir"
     static let email = "techmaleek@gmail.com"
     static let license = "MIT License"
@@ -53,9 +53,18 @@ enum Prefs {
     static var skippedVersion: String? { get { d.string(forKey: "skippedVersion") } set { d.set(newValue, forKey: "skippedVersion") } }
 }
 
-/// Lets the menu's checkboxes reflect and change preferences.
+/// Lets menus and the Settings window reflect and change app preferences.
 final class UpdatePrefs: ObservableObject {
     static let shared = UpdatePrefs()
+    @Published var appearance: AppearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "appearance")
+            let mode = appearance
+            Task { @MainActor in mode.apply() } }
+    }
+    /// The menu bar panel, alongside the main window.
+    @Published var showInMenuBar: Bool = UserDefaults.standard.object(forKey: "showInMenuBar") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar") }
+    }
     @Published var autoConvert: Bool = Prefs.autoConvertVideos {
         didSet { Prefs.autoConvertVideos = autoConvert }
     }

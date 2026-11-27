@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Browse the TV's storage and pick the folder files should go into.
 struct RemoteBrowser: View {
-    let config: FTPConfig
+    let config: Remote
     let startPath: String
     var onChoose: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -89,7 +89,7 @@ struct RemoteBrowser: View {
         let target = path
         Task {
             do {
-                let list = try await FTPClient.list(target, config: config)
+                let list = try await RemoteFS.list(target, on: config)
                 guard target == path else { return }
                 entries = list
             } catch {
@@ -108,7 +108,7 @@ struct RemoteBrowser: View {
         let target = join(path, name)
         Task {
             do {
-                try await FTPClient.makeDirectory(target, config: config)
+                try await RemoteFS.makeDirectory(target, on: config)
                 go(target)
             } catch {
                 self.error = error.localizedDescription

@@ -32,13 +32,14 @@ enum NetworkScanner {
         return Interface(address: ip, prefix: parts[0...2].joined(separator: "."))
     }
 
-    static func scan(port: Int) async -> [String] {
+    /// With `expectFTPGreeting`, only servers that greet like FTP ("220") count; otherwise any open port does (adb).
+    static func scan(port: Int, expectFTPGreeting: Bool = true) async -> [String] {
         guard let iface = localIPv4(), let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return [] }
         return await withTaskGroup(of: String?.self) { group in
             for i in 1...254 {
                 let ip = "\(iface.prefix).\(i)"
                 if ip == iface.address { continue }
-                group.addTask { await probe(host: ip, port: nwPort) ? ip : nil }
+                group.addTask { await probe(host: ip, port: nwPort, expectFTPGreeting: expectFTPGreeting) ? ip : nil }
             }
             var found: [String] = []
             for await r in group { if let r { found.append(r) } }
@@ -46,7 +47,7 @@ enum NetworkScanner {
         }
     }
 
-    private static func probe(host: String, port: NWEndpoint.Port) async -> Bool {
+    private static func probe(host: String, port: NWEndpoint.Port, expectFTPGreeting: Bool) async -> Bool {
         await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             let conn = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
             let once = Once()
@@ -56,6 +57,7 @@ enum NetworkScanner {
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
+                    guard expectFTPGreeting else { finish(true); return }
                     conn.receive(minimumIncompleteLength: 1, maximumLength: 256) { data, _, _, _ in
                         let text = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
                         finish(text.hasPrefix("220"))
