@@ -68,7 +68,7 @@ out=$(run secret /Movies "Movie (2024).mkv" || true); grep -q "resumedFrom=$part
 cmp "Movie (2024).mkv" "$WORK/tv/Movies/Movie (2024).mkv" || fail "resumed file differs"
 
 echo "== skip existing"
-run secret /Movies "Movie (2024).mkv" | grep -q "Already on TV" || fail "did not skip"
+grep -q "Already on TV" <<<"$(run secret /Movies "Movie (2024).mkv" 2>&1 || true)" || fail "did not skip"
 
 echo "== wrong password"
 out=$(run wrong /Movies "Movie (2024).mkv" || true)
@@ -78,12 +78,12 @@ echo "== video the TV may not play (full-range colour, level 5.0) is converted"
 if command -v ffmpeg >/dev/null; then
   ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1280x720:rate=30:duration=3 -f lavfi -i sine=duration=3 \
     -pix_fmt yuvj420p -c:v libx264 -level:v 5.0 -c:a aac -shortest "Clip.mov"
-  "$BIN" --check-video "Clip.mov" | grep -q "May not play" || fail "problem video not detected"
+  grep -q "May not play" <<<"$("$BIN" --check-video "Clip.mov" 2>&1 || true)" || fail "problem video not detected"
   out=$(run secret /Movies "Clip.mov" || true)
   grep -q "needsChoice" <<<"$out" || fail "did not ask before converting: $out"
   out=$(TVFERRY_AUTOCONVERT=1 "$BIN" --selftest 127.0.0.1 28782 tv secret /Movies "Clip.mov" 2>&1 || true)
   grep -q "done | Clip.mov -> /Movies/Clip.mp4" <<<"$out" || fail "auto-convert failed: $out"
-  "$BIN" --check-video "$WORK/tv/Movies/Clip.mp4" | grep -q ": OK" || fail "converted copy still flagged"
+  grep -q ": OK" <<<"$("$BIN" --check-video "$WORK/tv/Movies/Clip.mp4" 2>&1 || true)" || fail "converted copy still flagged"
 else
   echo "(ffmpeg not installed: skipping conversion test)"
 fi
@@ -117,7 +117,7 @@ grep -q "done | Movie (2024).mkv -> /Movies/Movie (2024).mkv | 52428800/52428800
 cmp "Movie (2024).mkv" "$WORK/sdcard/Movies/Movie (2024).mkv" || fail "adb copy differs"
 [[ -f "$WORK/sdcard/Movies/Q - What (cut).srt" && -f "$WORK/sdcard/Movies/Season 1/Ep 1.mkv" ]] || fail "adb names or folders wrong"
 grep -q "Movies" <<<"$out" || fail "adb listing missing"
-adb_run /Movies "Movie (2024).mkv" | grep -q "Already on TV" || fail "adb did not skip existing"
+grep -q "Already on TV" <<<"$(adb_run /Movies "Movie (2024).mkv" 2>&1 || true)" || fail "adb did not skip existing"
 out=$(FAKE_ADB_STATE=unauthorized adb_run /Movies "Movie (2024).mkv" || true)
 grep -q "allow debugging" <<<"$out" || fail "unauthorized message: $out"
 out=$(FAKE_ADB_STATE=refused adb_run /Movies "Movie (2024).mkv" || true)
